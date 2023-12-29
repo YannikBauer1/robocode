@@ -1,0 +1,217 @@
+package robo;
+
+import java.awt.Color;
+
+import robocode.*;
+import robocode.util.Utils;
+
+import static robocode.util.Utils.normalRelativeAngleDegrees;
+import java.awt.geom.Point2D;
+
+
+public class R extends AdvancedRobot {
+	
+	double enemyEnergy = 100;		//energia do inimigo
+	
+	static String dodgeStrategy = "linear"; 	//há 3 estrategias para desviar um projetil: linear, static e back
+	double bulletsHitMe = 0;		//conta os projetils sofridos enquanto usamos uma estrategia para desviar
+	double bulletsEnemyFired = 0;	//conta os projetils disparados do inimigo enquanto usamos uma estrategia para desviar
+	
+	static String shootingStrategy = "linear";		//há 2 estrategias para disparar: linear e no
+	double shotsHitted = 0;			//conta os projeteis acertados
+	double shotsMissed = 0;			//conta os projeteis falhados
+	
+	
+    public void run() {
+    	setColors(Color.blue, Color.white, Color.blue, Color.blue, Color.blue);
+    	do {
+	        if ( getRadarTurnRemaining() == 0.0 )	// Início da batalha a rotação do radar é 0
+	            setTurnRadarRightRadians( Double.POSITIVE_INFINITY ); 	// Rodar o radar infinitamente para a direita
+	        	setAdjustRadarForGunTurn(true);  	// Radar não roda com a rotação da arma
+	        	setAdjustGunForRobotTurn(true);		// Arma não roda com a rotacão do robô
+	        	setAdjustRadarForRobotTurn(true);	// Radar não roda com a rotação do robô
+	        execute();
+	    } while ( true );
+    }
+    public void onScannedRobot(ScannedRobotEvent e) {
+    	double angleToEnemy = getHeadingRadians() + e.getBearingRadians(); 		// Define variável do ângulo face o inimigo
+    	double radarTurn = Utils.normalRelativeAngle(angleToEnemy - getRadarHeadingRadians()); 		// Define variável com o necessário para o radar rodar
+    	double extraTurn = Math.min(Math.atan(36.0/e.getDistance()),Rules.RADAR_TURN_RATE_RADIANS);  	// Extra rotação do radar para compensar o movimento do inimigo
+    	if (radarTurn < 0) { 		// Ajuste do radar
+            radarTurn -= extraTurn;
+    	} else {
+            radarTurn += extraTurn;
+    	}
+    	setTurnRadarRightRadians(radarTurn);  // Roda o radar o calculado anteriormente
+    	
+    	if (getEnergy() > 20) {			// Se a energia do robô for superior a 20 disparar			
+        	if(shootingStrategy == "linear") {
+        		linearShooting(e);		// Usar a estratégia linear de disparo		
+        	}
+        }
+    	if (e.getEnergy()<enemyEnergy) {				// Desviar o projétil disparado do inimigo
+        	++bulletsEnemyFired;						// Contar os disparos
+        	dodge obj = new dodge(e);					// Cria um objeto da classe dodge
+        	if(dodgeStrategy=="linear") {				// Dependedo da estratégia que estamos a usar, chama a função a utilizar
+        		obj.dodgeAll(dodgeStrategy);
+        	} else if(dodgeStrategy=="back") {
+        		obj.dodgeAll(dodgeStrategy);
+        	} else if(dodgeStrategy=="static") {
+        		obj.dodgeAll(dodgeStrategy);
+        	}
+        	
+        } else if (e.getEnergy()==0) {			// Se o inimigo estiver sem energia, atacamos sem disparar (para o caso de não termos energia também)
+        	turnRight(e.getBearing());
+        	while(true) {
+        		ahead(150);
+        		back(10);
+        	}
+        }
+        enemyEnergy=e.getEnergy();
+    	
+    }
+    public void onBulletHit(BulletHitEvent e) {
+    	++shotsHitted;							// Contar tiros que acertamos
+    	enemyEnergy=e.getEnergy();				// Obter energia do inimigo
+    }
+    public void onHitByBullet(HitByBulletEvent e) {
+    	++bulletsHitMe;							// Contar tiros que sofremos
+    	if (bulletsHitMe >= 4 && (bulletsHitMe/bulletsEnemyFired) > 0.2) {		// Mudar a estrategia quando sofremos muitos projetils
+    		if (dodgeStrategy=="linear") {
+    			dodgeStrategy="static";
+    			System.out.println("change dodge Strategy from linear to static");
+    		} else if (dodgeStrategy=="static") {
+    			dodgeStrategy="back";
+    			System.out.println("change dodge Strategy from static to back");
+    		} else if (dodgeStrategy=="back") {
+    			dodgeStrategy="linear";
+    			System.out.println("change dodge Strategy from back to linear");
+    		}
+    		bulletsHitMe=0;						// Definir novamente a variável como 0
+    		bulletsEnemyFired=0;				// Definir novamente a variável como 0
+    	}
+    }
+    public void onBulletMissed(BulletMissedEvent e) {
+    	++shotsMissed;							// Conta os tiros falhados -> que acertam a parede
+    	if (shotsMissed >= 8 && (shotsHitted/shotsMissed) < 0.1) {		// Se os tiros falhados forem maior que 8 e a razão entre os acertos e falhados menor que 1, não disparar
+    		shootingStrategy = "no";
+    		System.out.println("change shooting Strategy to no");
+    	}
+    	shotsHitted = 0;						// Definir novamente a variável como 0
+    	shotsMissed = 0;						// Definir novamente a variável como 0
+    }
+    
+    public void onHitRobot(HitRobotEvent e) {	// Com o robô frente a nós disparar balas de potência máxima
+    	fire(3);
+		scan();
+	}
+    public void onHitWall(HitWallEvent e) {		// Se estivermos frente à parede e colidirmos, rodamos e avançamos, mas de costas para a parede apenas avançamos 
+		turnRight(180);
+		ahead(150);
+	}
+    public boolean headingWall() {				// Obtemos as nossas coordenadas em função do campo de batalha, se estivermos perto definimos como True
+    	double h = getBattleFieldHeight();
+		double w = getBattleFieldWidth();
+		double x = getX();
+		double y = getY();
+    	if(y<(h/5) && getHeading()>90 && getHeading()<270) {
+    		return true;
+		} else if (y>(h-h/5) && getHeading()<90 && getHeading()>270) {
+			return true;
+		} else if (x<(w/5) && getHeading()>180) {
+			return true;
+		} else if (x>(w-w/5) && getHeading()<180) {
+			return true;
+		}
+    	return false;
+    }
+		
+    public void linearShooting(ScannedRobotEvent event) {			// Estratégia de previsão de disparo linear
+    	double rX = getX();		// X atual do meu robô
+        double rY = getY();		// Y atual do meu robô
+       	double absBearing = event.getBearingRadians() + getHeadingRadians();	// Útil para obter as coordenadas atuais do robô inimigo
+       	double predictX = rX + event.getDistance() * Math.sin(absBearing);	// Fórmula para obter X do inimigo perante as nossas coordenadas
+       	double predictY = rY + event.getDistance() * Math.cos(absBearing);	// Fórmula para obter Y do inimigo perante as nossas coordenadas
+       	double enemyHeading = event.getHeadingRadians(); 	// Direção que o inimigo se está a mover
+       	double enemyVelocity = event.getVelocity();		// Velocidade do inimigo
+       	double bulletPower = 3.0;
+       	
+       	double deltaTime = 0; 		// Unidades de tempo que passaram
+
+        	
+       	// Incrementa 1 valor ao deltaTime -- Fórmula define a força da bala que iremos dispar --- Classe do java utilizada para obtermos a nossa função de distância consoante a nossa posiçãp
+       	while ((++deltaTime) * (20 - 3.0 * bulletPower) < Point2D.Double.distance(rX, rY, predictX, predictY)) {
+       		predictX += Math.sin(enemyHeading) * enemyVelocity;		//Calcula o X que se prevê que o inimigo estará, multiplicando o sin da direção que estava a tomar pela sua velocidade
+       		predictY += Math.cos(enemyHeading) * enemyVelocity;		//Calcula o Y que se prevê que o inimigo estará, multiplicando o cos da direção que estava a tomar pela sua velocidade
+       		
+       		if (predictX > getBattleFieldWidth() || predictX < 0 || predictY > getBattleFieldHeight() || predictY < 0) {
+       			break;		// Se X ou Y que prevermos for fora do campo de batalha, terminamos o loop
+       		}
+        }
+        	
+        double angle = Utils.normalAbsoluteAngle(Math.atan2(predictX - rX, predictY - rY)); 				// Classe "Utils" permite descobrirmos o ângulo de disparo
+       	setTurnGunRightRadians(Utils.normalRelativeAngle(absBearing - getGunHeadingRadians())); 	// Virar a arma para a direção que queremos disparar
+       	setTurnGunRightRadians(Utils.normalRelativeAngle(angle - getGunHeadingRadians()));
+       	if(getGunHeat() == 0) {
+       		setFire(bulletPower); 		// Disparar a bala se a arma não estiver sobreaquecida
+       	}
+     }
+
+    class dodge {						// Classe organizada do aontecimento de desviar
+    	ScannedRobotEvent event;
+    	double bearing;
+    	
+		dodge(ScannedRobotEvent e) {
+			this.event=e;
+			this.bearing = event.getBearing();
+    	}
+		public void dodgeAll(String s) {
+			if(bearing<90 && bearing>0) {				// Quando o inimigo está à direita e acima do nosso robô, virar na direção do inimigo em função da estratégia que tomamos
+				if (s=="linear") {
+					turnLeft(90-bearing);
+        		} else if (s=="back") {
+        			turnLeft(90-bearing);
+        		} else if (s=="static") {
+        			turnRight(bearing);
+        		}
+            }else if (bearing>90 && bearing<180) {		// Quando o inimigo está à direita e abaixo do nosso robô, virar na direção do inimigo em função da estratégia que tomamos
+            	if (s=="linear") {
+            		turnRight(bearing-90);
+        		} else if (s=="back") {
+        			turnRight(bearing-90);
+        		} else if (s=="static") {
+        			turnLeft(180-bearing);
+        		}
+            } else if (bearing<0 && bearing>-90) {		// Quando o inimigo está à esquerda e acima do nosso robô, virar na direção do inimigo em função da estratégia que tomamos
+            	if (s=="linear") {
+            		turnRight(90+bearing);
+        		} else if (s=="back") {
+        			turnRight(90+bearing);
+        		} else if (s=="static") {
+        			turnLeft(-bearing);
+        		}
+            } else if (bearing>-180 && bearing<-90) {	// Quando o inimigo está à esquerda e abaixo do nosso robô, virar na direção do inimigo em função da estratégia que tomamos
+            	if (s=="linear") {
+            		turnLeft(-bearing+90);
+        		} else if (s=="back") {
+        			turnLeft(-bearing+90);
+        		} else if (s=="static") {
+        			turnRight(180+bearing);
+        		}
+            } 
+			
+			if (headingWall()==true) {					// Se perto da parede, recuamos
+        		back(150);
+        	}else {										// Senão estamos perto de uma parede, dependendo da estratégia, movimentamos
+        		if (dodgeStrategy=="linear") {
+        			ahead(50);
+        		} else if (dodgeStrategy=="back") {
+        			back(50);
+        		} else if (dodgeStrategy=="static") {
+        			ahead(50);
+        		}
+        	}
+        }
+    }
+}
+

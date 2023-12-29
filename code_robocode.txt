@@ -1,0 +1,219 @@
+package robo;
+
+import java.awt.Color;
+
+import robocode.*;
+import robocode.util.Utils;
+
+import java.awt.geom.Point2D;
+
+
+public class R extends AdvancedRobot {
+	
+	boolean peek; 		// Não rodar caso esteja um robô lá
+	double enemyEnergy = 100;		//energia do inimigo
+	String turning;
+	
+	static String dodgeStrategy = "linear"; 	//há 3 estrategias para desviar um projetil: linear, static e back
+	double bulletsHitMe = 0;		//conta para os projetils sofridos durante ao usar uma estrategia para desviar
+	double bulletsEnemyFired = 0;	//conta para os projetils disparados do inimigo durante ao usar uma estrategia para desviar
+	
+	 
+	public void run() {
+		setColors(Color.blue, Color.white, Color.blue, Color.blue, Color.blue);
+		do {
+	        if ( getRadarTurnRemaining() == 0.0 )
+	            setTurnRadarRightRadians( Double.POSITIVE_INFINITY ); 	// Rodar o radar infinitamente para a direita
+	        	setAdjustRadarForGunTurn(true);  	// Radar não rodar com a rotação da arma
+	        execute();
+	    } while ( true );
+	}
+	
+    public void onScannedRobot(ScannedRobotEvent e) {
+    	
+    	double angleToEnemy = getHeadingRadians() + e.getBearingRadians(); 		// Ângulo exato perante o inimigo
+    	double radarTurn = Utils.normalRelativeAngle( angleToEnemy - getRadarHeadingRadians() ); 	 // Quanto é necessário para rodar o radar, usando a classe "utils"
+    	// Distância lateral que queremos scanear, usando o robô como centro; 36.0 - corresponde à distância que estamos a cobrir
+    	double extraTurn = Math.min( Math.atan( 36.0 / e.getDistance() ), Rules.RADAR_TURN_RATE_RADIANS ); 		
+    	if (radarTurn < 0) { 		// Ajuste do radar
+            radarTurn -= extraTurn;
+    	} else {
+            radarTurn += extraTurn;
+    	}
+    	
+    	setTurnRadarRightRadians(radarTurn);  	// Roda o radar
+    	
+    	
+    	double rX = getX();	// X atual do meu robô
+    	double rY = getY();	// Y atual do meu robô
+    	double absBearing = e.getBearingRadians() + getHeadingRadians();	// Útil para obter as coordenadas atuais do robô inimigo
+    	double enemyX = rX + e.getDistance() * Math.sin(absBearing);	// Fórmula para obter X atual do inimigo
+    	double enemyY = rY + e.getDistance() * Math.cos(absBearing);	// Fórmula para obter Y atual do inimigo
+    	double enemyHeading = e.getHeadingRadians(); 	// Direção que o inimigo se está a mover
+    	double enemyVelocity = e.getVelocity();		// Velocidade do inimigo
+    	double bulletPower = 3.0;
+    	
+    	double deltaTime = 0; 	// Unidades de tempo que passaram
+    	double predictX = enemyX;
+    	double predictY = enemyY;
+    	
+    	//	Incrementa 1 valor ao deltaTime -- Fórmula define a força da bala que disparamos --- Classe do java utilizada para obtermos a nossa função de distância 
+    	while ((++deltaTime) * (20 - 3.0 * bulletPower) < Point2D.Double.distance(rX, rY, predictX, predictY)) {
+    		predictX += Math.sin(enemyHeading) * enemyVelocity;		//Calcula o X que se prevê que o inimigo estará, multiplicando o sin da direção que estava a tomar pela sua velocidade
+    		predictY += Math.cos(enemyHeading) * enemyVelocity;		//Calcula o Y que se prevê que o inimigo estará, multiplicando o cos da direção que estava a tomar pela sua velocidade
+    		
+    		if (predictX > getBattleFieldWidth() || predictX < 0 || predictY > getBattleFieldHeight() || predictY < 0) {
+    			break;		// Se X ou Y que prevermos for fora do campo de batalha, terminamos o loop
+    		}
+    	}
+    	
+    	double angle = Utils.normalAbsoluteAngle(Math.atan2(predictX - rX, predictY - rY)); 	// Classe "Utils" permite descobrirmos o ângulo de disparo
+    	setTurnGunRightRadians(Utils.normalRelativeAngle(absBearing - getGunHeadingRadians())); 		// Virar a arma para a direção que queremos disparar
+    	setTurnGunRightRadians(Utils.normalRelativeAngle(angle - getGunHeadingRadians()));
+    	if( getGunHeat() == 0 & getEnergy() > 20) {
+    		setFire(bulletPower); 		//Disparar a bala
+    	}
+    	
+    	if (e.getEnergy()<enemyEnergy) {				//desviar um projetil disparado do inimigo
+         	bulletsEnemyFired = bulletsEnemyFired+1;
+         	dodge obj = new dodge(e);
+         	if(dodgeStrategy=="linear") {
+         		obj.dodgeAll(dodgeStrategy);
+         	} else if(dodgeStrategy=="back") {
+         		obj.dodgeAll(dodgeStrategy);
+         	} else if(dodgeStrategy=="static") {
+         		obj.dodgeAll(dodgeStrategy);
+         	}
+         
+         if (headingWall()==true) {
+        	back(150);
+        }else {
+        	if (dodgeStrategy=="linear") {
+        		ahead(100);
+        	} else if (dodgeStrategy=="back") {
+        		back(100);
+        	} else if (dodgeStrategy=="static") {
+        		ahead(50);
+        	}
+        }
+    }
+    	
+    	if (peek) {
+    		scan();
+    	}
+    }
+
+    public void onHitByBullet(HitByBulletEvent e) {
+    	bulletsHitMe=bulletsHitMe+1;
+    	if (bulletsHitMe>=4 && (bulletsHitMe/bulletsEnemyFired)>0.2) {		//mudar a estrategia quando sofremos muitos projetils
+    		System.out.println("change dodge Strategy");
+    		if (dodgeStrategy=="linear") {
+    			dodgeStrategy="static";
+    		} else if (dodgeStrategy=="static") {
+    			dodgeStrategy="back";
+    		} else if (dodgeStrategy=="back") {
+    			dodgeStrategy="linear";
+    		}
+    		bulletsHitMe=0;
+    		bulletsEnemyFired=0;
+    	}
+    }
+
+    class dodge {
+    	ScannedRobotEvent event;
+    	double bearing;
+    	
+		dodge(ScannedRobotEvent e) {
+			this.event=e;
+			this.bearing = event.getBearing();
+    	}
+		public void dodgeAll(String s) {
+			if(bearing<90 && bearing>0) {
+				if (s=="linear") {
+					turnLeft(90-bearing);
+					turning="left";
+        		} else if (s=="back") {
+        			turnLeft(90-bearing);
+        			turning="left";
+        		} else if (s=="static") {
+        			turnRight(bearing);
+        			turning="right";
+        		}
+            }else if (bearing>90 && bearing<180) {
+            	if (s=="linear") {
+            		turnRight(bearing-90);
+            		turning="right";
+        		} else if (s=="back") {
+        			turnRight(bearing-90);
+        			turning="right";
+        		} else if (s=="static") {
+        			turnLeft(180-bearing);
+        			turning="left";
+        		}
+            } else if (bearing<0 && bearing>-90) {
+            	if (s=="linear") {
+            		turnRight(90+bearing);
+            		turning="right";
+        		} else if (s=="back") {
+        			turnRight(90+bearing);
+        			turning="right";
+        		} else if (s=="static") {
+        			turnLeft(-bearing);
+        			turning="left";
+        		}
+            } else if (bearing>-180 && bearing<-90) {
+            	if (s=="linear") {
+            		turnLeft(-bearing+90);
+            		turning="left";
+        		} else if (s=="back") {
+        			turnLeft(-bearing+90);
+        			turning="left";
+        		} else if (s=="static") {
+        			turnRight(180+bearing);
+        			turning="right";
+        		}
+            }
+        }
+    }
+    
+    public void onHitRobot(HitRobotEvent e) {
+		if (e.getBearing() > -90 && e.getBearing() < 90) {
+			turnRight(90);
+			if (headingWall()) {
+				back(100);
+			}else {
+				ahead(100);
+			}
+		} else {
+			turnLeft(90);
+			if (headingWall()) {
+				back(100);
+			}else {
+				ahead(100);
+			}
+		}
+		scan();
+	}
+    
+    public void onHitWall(HitWallEvent e) {
+		turnRight(180);
+		ahead(100);
+	}
+    
+    public boolean headingWall() {
+    	double h = getBattleFieldHeight();
+		double w = getBattleFieldWidth();
+		double x = getX();
+		double y = getY();
+    	if(y<(h/5) && getHeading()>90 && getHeading()<270) {
+    		return true;
+		} else if (y>(h-h/5) && getHeading()<90 && getHeading()>270) {
+			return true;
+		} else if (x<(w/5) && getHeading()>180) {
+			return true;
+		} else if (x>(w-w/5) && getHeading()<180) {
+			return true;
+		}
+    	return false;
+    }
+}
